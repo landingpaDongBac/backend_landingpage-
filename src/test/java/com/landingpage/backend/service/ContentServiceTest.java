@@ -5,6 +5,8 @@ import com.landingpage.backend.api.dto.ContentDocumentRequest;
 import com.landingpage.backend.domain.ContentDocument;
 import com.landingpage.backend.domain.ContentRevision;
 import com.landingpage.backend.domain.ContentStatus;
+import com.landingpage.backend.domain.MediaAsset;
+import com.landingpage.backend.domain.MediaResourceType;
 import com.landingpage.backend.domain.Section;
 import com.landingpage.backend.exception.ConflictException;
 import com.landingpage.backend.repository.ContentDocumentRepository;
@@ -18,6 +20,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -110,6 +113,34 @@ class ContentServiceTest {
                 .hasMessageContaining("disabled section");
     }
 
+    @Test
+    void loadsMediaForPublishedContentInOneBatch() throws Exception {
+        ContentDocument first = document("{\"type\":\"doc\",\"content\":[{\"type\":\"image\"}]}");
+        ContentDocument second = document("{\"type\":\"doc\",\"content\":[{\"type\":\"video\"}]}");
+        first.setPublishedContentJson(first.getContentJson());
+        second.setPublishedContentJson(second.getContentJson());
+        first.setStatus(ContentStatus.PUBLISHED);
+        second.setStatus(ContentStatus.PUBLISHED);
+        UUID imageId = UUID.randomUUID();
+        UUID videoId = UUID.randomUUID();
+        MediaAsset image = media(imageId, MediaResourceType.IMAGE, "https://cdn.example/image.jpg");
+        MediaAsset video = media(videoId, MediaResourceType.VIDEO, "https://cdn.example/video.mp4");
+
+        when(documentRepository.findByStatusAndSectionEnabledTrueOrderBySectionDisplayOrderAscDisplayOrderAsc(
+                ContentStatus.PUBLISHED)).thenReturn(List.of(first, second));
+        when(validator.validateAndExtractMedia(first.getPublishedContentJson()))
+                .thenReturn(Map.of(imageId, MediaResourceType.IMAGE));
+        when(validator.validateAndExtractMedia(second.getPublishedContentJson()))
+                .thenReturn(Map.of(videoId, MediaResourceType.VIDEO));
+        when(mediaAssetRepository.findAllById(any())).thenReturn(List.of(image, video));
+
+        var response = service.listPublished();
+
+        assertThat(response).hasSize(2);
+        assertThat(response).flatExtracting(item -> item.media()).hasSize(2);
+        verify(mediaAssetRepository).findAllById(any());
+    }
+
     private ContentDocument document(String json) throws Exception {
         ContentDocument document = new ContentDocument();
         document.setId(UUID.randomUUID());
@@ -130,5 +161,13 @@ class ContentServiceTest {
         document.setCreatedAt(Instant.now());
         document.setUpdatedAt(Instant.now());
         return document;
+    }
+
+    private MediaAsset media(UUID id, MediaResourceType type, String url) {
+        MediaAsset asset = new MediaAsset();
+        asset.setId(id);
+        asset.setResourceType(type);
+        asset.setSecureUrl(url);
+        return asset;
     }
 }

@@ -53,7 +53,10 @@ public class SecurityConfig {
                                 writeError(response, request.getRequestURI(), HttpStatus.FORBIDDEN, "Access denied")))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/public/**", "/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/actuator/health/**",
+                        .requestMatchers(HttpMethod.GET, "/api/public/ping", "/api/public/content",
+                                "/api/public/content/**", "/api/public/site-settings").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/public/leads").permitAll()
+                        .requestMatchers("/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/actuator/health/**",
                                 "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .requestMatchers("/api/auth/me", "/api/auth/session", "/api/auth/change-password", "/api/admin/**").authenticated()
                         .anyRequest().denyAll())

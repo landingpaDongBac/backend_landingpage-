@@ -17,14 +17,19 @@ class SecurityConfigCorsTest {
                 "http://localhost:5173",
                 "http://127.0.0.1:5173",
                 "http://localhost:5174",
-                "http://127.0.0.1:5174"));
+                "http://127.0.0.1:5174",
+                "https://public-frontend.example.vercel.app"));
         CorsConfiguration configuration = source.getCorsConfiguration(new MockHttpServletRequest());
 
         assertThat(configuration.checkOrigin("http://localhost:5173")).isEqualTo("http://localhost:5173");
         assertThat(configuration.checkOrigin("http://127.0.0.1:5173")).isEqualTo("http://127.0.0.1:5173");
         assertThat(configuration.checkOrigin("http://localhost:5174")).isEqualTo("http://localhost:5174");
         assertThat(configuration.checkOrigin("http://127.0.0.1:5174")).isEqualTo("http://127.0.0.1:5174");
+        assertThat(configuration.checkOrigin("https://public-frontend.example.vercel.app"))
+                .isEqualTo("https://public-frontend.example.vercel.app");
         assertThat(configuration.checkOrigin("https://untrusted.example")).isNull();
         assertThat(configuration.getAllowCredentials()).isTrue();
+        assertThat(configuration.getAllowedMethods()).contains("OPTIONS", "GET", "POST");
+        assertThat(configuration.getAllowedHeaders()).contains("Authorization", "Content-Type");
     }
 }

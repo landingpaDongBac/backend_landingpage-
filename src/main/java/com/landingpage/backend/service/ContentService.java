@@ -34,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 
@@ -275,10 +277,23 @@ public class ContentService {
 
     @Transactional(readOnly = true)
     public List<PublicContentResponse> listPublished() {
-        return documentRepository
+        List<ContentDocument> documents = documentRepository
                 .findByStatusAndSectionEnabledTrueOrderBySectionDisplayOrderAscDisplayOrderAsc(ContentStatus.PUBLISHED)
-                .stream().filter(document -> document.getPublishedContentJson() != null)
-                .map(this::toPublicResponse).toList();
+                .stream().filter(document -> document.getPublishedContentJson() != null).toList();
+
+        Map<UUID, Map<UUID, MediaResourceType>> referencesByDocument = new HashMap<>();
+        Set<UUID> mediaIds = new HashSet<>();
+        for (ContentDocument document : documents) {
+            Map<UUID, MediaResourceType> references = richTextValidator
+                    .validateAndExtractMedia(document.getPublishedContentJson());
+            referencesByDocument.put(document.getId(), references);
+            mediaIds.addAll(references.keySet());
+        }
+
+        Map<UUID, MediaAsset> mediaById = loadMedia(mediaIds);
+        return documents.stream()
+                .map(document -> toPublicResponse(document, referencesByDocument.get(document.getId()), mediaById))
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -287,7 +302,9 @@ public class ContentService {
                 .findBySlugAndStatusAndSectionEnabledTrue(slug, ContentStatus.PUBLISHED)
                 .filter(value -> value.getPublishedContentJson() != null)
                 .orElseThrow(() -> new ResourceNotFoundException("Published content not found"));
-        return toPublicResponse(document);
+        Map<UUID, MediaResourceType> references = richTextValidator
+                .validateAndExtractMedia(document.getPublishedContentJson());
+        return toPublicResponse(document, references, loadMedia(references.keySet()));
     }
 
     private void validateMediaReferences(JsonNode content) {
@@ -329,17 +346,29 @@ public class ContentService {
                 document.getArchivedAt(), document.getCreatedBy(), document.getUpdatedBy(), document.getPublishedBy());
     }
 
-    private PublicContentResponse toPublicResponse(ContentDocument document) {
+    private PublicContentResponse toPublicResponse(ContentDocument document,
+                                                   Map<UUID, MediaResourceType> references,
+                                                   Map<UUID, MediaAsset> mediaById) {
         Section section = document.getSection();
-        Map<UUID, MediaResourceType> references = richTextValidator
-                .validateAndExtractMedia(document.getPublishedContentJson());
-        List<PublicMediaResponse> media = mediaAssetRepository.findAllById(references.keySet()).stream()
+        List<PublicMediaResponse> media = references.keySet().stream()
+                .map(mediaById::get)
+                .filter(java.util.Objects::nonNull)
                 .map(asset -> new PublicMediaResponse(asset.getId(), asset.getResourceType(), asset.getMimeType(),
                         asset.getSecureUrl(), asset.getWidth(), asset.getHeight(), asset.getDuration()))
                 .toList();
         return new PublicContentResponse(document.getId(), section.getSectionKey(), section.getName(),
                 section.getDisplayOrder(), document.getTitle(), document.getSlug(),
                 copy(document.getPublishedContentJson()), media, document.getDisplayOrder(), document.getPublishedAt());
+    }
+
+    private Map<UUID, MediaAsset> loadMedia(Set<UUID> mediaIds) {
+        if (mediaIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, MediaAsset> mediaById = new HashMap<>();
+        mediaAssetRepository.findAllById(mediaIds)
+                .forEach(asset -> mediaById.put(asset.getId(), asset));
+        return mediaById;
     }
 
     private ContentRevisionResponse toRevisionResponse(ContentRevision revision) {
