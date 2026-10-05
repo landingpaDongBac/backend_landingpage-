@@ -1,0 +1,12 @@
+.mvn/wrapper/apache-maven-*/
+.mvn/wrapper/*.zip
+target/
+!.mvn/wrapper/maven-wrapper.properties
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+.idea/
+.vscode/
+*.iml

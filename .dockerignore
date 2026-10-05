@@ -1,0 +1,10 @@
+target/
+.git/
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example
+*.log
+.mvn/wrapper/apache-maven-*/
+.mvn/wrapper/*.zip
