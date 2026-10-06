@@ -16,8 +16,6 @@ server:
   forward-headers-strategy: framework
 
 app:
-  cors:
-    allowed-origins: ${FRONTEND_URL}
   jwt:
     secret: ${JWT_SECRET}
     expiration-ms: ${JWT_EXPIRATION}

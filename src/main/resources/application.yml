@@ -52,7 +52,7 @@ springdoc:
 
 app:
   cors:
-    allowed-origins: ${FRONTEND_URL:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
+    allowed-origins: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,${FRONTEND_URL:},${ADMIN_FRONTEND_URL:https://fe-admin-landingpage-ivory.vercel.app}
   jwt:
     secret: ${JWT_SECRET:dev-secret-change-me-dev-secret-change-me}
     expiration-ms: ${JWT_EXPIRATION:900000}

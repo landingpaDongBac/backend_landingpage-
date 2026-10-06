@@ -12,6 +12,7 @@ import com.landingpage.backend.domain.MediaAsset;
 import com.landingpage.backend.domain.MediaResourceType;
 import com.landingpage.backend.exception.BadRequestException;
 import com.landingpage.backend.exception.ConflictException;
+import com.landingpage.backend.exception.MultimediaUploadException;
 import com.landingpage.backend.exception.ResourceNotFoundException;
 import com.landingpage.backend.exception.ServiceUnavailableException;
 import com.landingpage.backend.repository.ContentDocumentRepository;
@@ -19,6 +20,8 @@ import com.landingpage.backend.repository.ContentRevisionRepository;
 import com.landingpage.backend.repository.MediaAssetRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -28,6 +31,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Locale;
@@ -63,44 +67,49 @@ public class MediaService {
     @Value("${app.cloudinary.folder}")
     private String folder;
 
-    @Transactional
     public MediaAssetResponse upload(MultipartFile file, MediaResourceType resourceType, String actor) {
         ensureConfigured();
-        byte[] bytes = readAndValidate(file, resourceType);
+        validateFile(file, resourceType);
+        Map<?, ?> result;
         try {
-            Map<?, ?> result = cloudinary.uploader().upload(bytes, ObjectUtils.asMap(
+            try (InputStream input = file.getInputStream()) {
+                result = cloudinary.uploader().upload(input, ObjectUtils.asMap(
                     "folder", folder,
                     "resource_type", resourceType.cloudinaryValue(),
                     "use_filename", true,
                     "unique_filename", true,
                     "overwrite", false));
-            MediaAsset saved = mediaRepository.save(fromCloudinary(result, resourceType,
-                    safeOriginalFilename(file.getOriginalFilename()), file.getContentType(), actor));
-            audit(actor, "MEDIA_UPLOADED", saved.getId(), "Media uploaded to Cloudinary");
-            return toResponse(saved);
-        } catch (IOException exception) {
-            throw new ServiceUnavailableException("Cloudinary upload failed", exception);
+            }
+        } catch (Exception exception) {
+            throw new MultimediaUploadException("Cloudinary upload failed", exception);
         }
+        MediaAsset saved = persist(fromCloudinary(result, resourceType,
+                safeOriginalFilename(file.getOriginalFilename()), file.getContentType(), actor));
+        audit(actor, "MEDIA_UPLOADED", saved.getId(), "Media uploaded to Cloudinary");
+        return toResponse(saved);
     }
 
     public UploadSignatureResponse createUploadSignature(MediaResourceType resourceType) {
         ensureConfigured();
-        long timestamp = Instant.now().getEpochSecond();
-        List<String> allowedFormats = resourceType == MediaResourceType.IMAGE
-                ? List.of("jpg", "jpeg", "png", "webp") : List.of("mp4", "mov", "webm");
-        Map<String, Object> parameters = ObjectUtils.asMap(
-                "timestamp", timestamp,
-                "folder", folder,
-                "allowed_formats", allowedFormats,
-                "use_filename", true,
-                "unique_filename", true,
-                "overwrite", false);
-        String signature = cloudinary.apiSignRequest(parameters, apiSecret);
-        return new UploadSignatureResponse(timestamp, signature, apiKey, cloudName, folder,
-                resourceType.cloudinaryValue(), allowedFormats, true, true, false);
+        try {
+            long timestamp = Instant.now().getEpochSecond();
+            List<String> allowedFormats = resourceType == MediaResourceType.IMAGE
+                    ? List.of("jpg", "jpeg", "png", "webp") : List.of("mp4", "mov", "webm");
+            Map<String, Object> parameters = ObjectUtils.asMap(
+                    "timestamp", timestamp,
+                    "folder", folder,
+                    "allowed_formats", allowedFormats,
+                    "use_filename", true,
+                    "unique_filename", true,
+                    "overwrite", false);
+            String signature = cloudinary.apiSignRequest(parameters, apiSecret);
+            return new UploadSignatureResponse(timestamp, signature, apiKey, cloudName, folder,
+                    resourceType.cloudinaryValue(), allowedFormats, true, true, false);
+        } catch (RuntimeException exception) {
+            throw new MultimediaUploadException("Unable to create Cloudinary upload signature", exception);
+        }
     }
 
-    @Transactional
     public MediaAssetResponse confirmDirectUpload(MediaConfirmRequest request, String actor) {
         ensureConfigured();
         if (!(request.publicId().equals(folder) || request.publicId().startsWith(folder + "/"))) {
@@ -177,7 +186,7 @@ public class MediaService {
                     "resource_type", asset.getResourceType().cloudinaryValue(), "invalidate", true));
             mediaRepository.delete(asset);
             audit(null, "MEDIA_DELETED", id, "Media deleted from Cloudinary and registry");
-        } catch (IOException exception) {
+        } catch (Exception exception) {
             throw new ServiceUnavailableException("Cloudinary deletion failed", exception);
         }
     }
@@ -191,17 +200,19 @@ public class MediaService {
             if (!asset.getCloudinaryPublicId().equals(request.publicId())) {
                 throw new BadRequestException("Cloudinary asset identity mismatch");
             }
-            MediaAsset saved = mediaRepository.save(asset);
+            MediaAsset saved = persist(asset);
             audit(actor, "MEDIA_CONFIRMED", saved.getId(), "Direct Cloudinary upload confirmed");
             return toResponse(saved);
         } catch (BadRequestException exception) {
             throw exception;
+        } catch (MultimediaUploadException exception) {
+            throw exception;
         } catch (Exception exception) {
-            throw new ServiceUnavailableException("Unable to verify Cloudinary upload", exception);
+            throw new MultimediaUploadException("Unable to verify Cloudinary upload", exception);
         }
     }
 
-    private byte[] readAndValidate(MultipartFile file, MediaResourceType resourceType) {
+    private void validateFile(MultipartFile file, MediaResourceType resourceType) {
         if (file == null || file.isEmpty()) {
             throw new BadRequestException("A non-empty file is required");
         }
@@ -211,12 +222,11 @@ public class MediaService {
         if (!allowed.contains(extension)) {
             throw new BadRequestException("Unsupported " + resourceType.name().toLowerCase(Locale.ROOT) + " file extension");
         }
-        try {
-            byte[] bytes = file.getBytes();
-            if (!matchesSignature(bytes, extension)) {
+        try (InputStream input = file.getInputStream()) {
+            byte[] header = input.readNBytes(12);
+            if (!matchesSignature(header, extension)) {
                 throw new BadRequestException("File content does not match its extension");
             }
-            return bytes;
         } catch (IOException exception) {
             throw new BadRequestException("Unable to read uploaded file", exception);
         }
@@ -256,16 +266,30 @@ public class MediaService {
         Object publicId = result.get("public_id");
         Object secureUrl = result.get("secure_url");
         if (publicId == null || secureUrl == null) {
-            throw new ServiceUnavailableException("Cloudinary response is missing required asset metadata");
+            throw new MultimediaUploadException("Cloudinary response is missing required asset metadata");
+        }
+        String returnedType = stringValue(result.get("resource_type"));
+        if (returnedType != null && !resourceType.cloudinaryValue().equalsIgnoreCase(returnedType)) {
+            throw new BadRequestException("Cloudinary resource type does not match the requested media type");
+        }
+        String format = stringValue(result.get("format"));
+        Set<String> allowedFormats = resourceType == MediaResourceType.IMAGE ? IMAGE_EXTENSIONS : VIDEO_EXTENSIONS;
+        if (format != null && !allowedFormats.contains(format.toLowerCase(Locale.ROOT))) {
+            throw new BadRequestException("Cloudinary asset format is not supported");
+        }
+        String secureUrlValue = secureUrl.toString();
+        if (!secureUrlValue.startsWith("https://")) {
+            throw new MultimediaUploadException("Cloudinary response did not contain a secure asset URL");
         }
         MediaAsset asset = new MediaAsset();
         asset.setCloudinaryPublicId(publicId.toString());
         asset.setCloudinaryAssetId(stringValue(result.get("asset_id")));
         asset.setResourceType(resourceType);
-        asset.setFormat(stringValue(result.get("format")));
-        asset.setMimeType(suppliedMimeType == null ? mimeType(resourceType, asset.getFormat()) : suppliedMimeType);
+        asset.setFormat(format);
+        String derivedMimeType = mimeType(resourceType, asset.getFormat());
+        asset.setMimeType(derivedMimeType == null ? safeSuppliedMimeType(suppliedMimeType, resourceType) : derivedMimeType);
         asset.setOriginalFileName(originalFilename);
-        asset.setSecureUrl(secureUrl.toString());
+        asset.setSecureUrl(secureUrlValue);
         asset.setFileSize(longValue(result.get("bytes")));
         asset.setWidth(integerValue(result.get("width")));
         asset.setHeight(integerValue(result.get("height")));
@@ -320,8 +344,19 @@ public class MediaService {
 
     private void ensureConfigured() {
         if (cloudName == null || cloudName.isBlank() || apiKey == null || apiKey.isBlank()
-                || apiSecret == null || apiSecret.isBlank()) {
-            throw new ServiceUnavailableException("Cloudinary is not configured");
+                || apiSecret == null || apiSecret.isBlank() || folder == null || folder.isBlank()) {
+            throw new MultimediaUploadException("Cloudinary is not configured");
+        }
+    }
+
+    private MediaAsset persist(MediaAsset asset) {
+        try {
+            return mediaRepository.saveAndFlush(asset);
+        } catch (DataIntegrityViolationException exception) {
+            return mediaRepository.findByCloudinaryPublicId(asset.getCloudinaryPublicId())
+                    .orElseThrow(() -> exception);
+        } catch (DataAccessException exception) {
+            throw new MultimediaUploadException("Unable to persist Cloudinary asset metadata", exception);
         }
     }
 
@@ -359,6 +394,12 @@ public class MediaService {
         if (format == null) return null;
         String normalized = "jpg".equalsIgnoreCase(format) ? "jpeg" : format.toLowerCase(Locale.ROOT);
         return type.cloudinaryValue() + "/" + normalized;
+    }
+
+    private String safeSuppliedMimeType(String value, MediaResourceType type) {
+        if (value == null) return null;
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return normalized.startsWith(type.cloudinaryValue() + "/") ? normalized : null;
     }
 
     private void audit(String actor, String action, UUID id, String description) {

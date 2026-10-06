@@ -15,6 +15,9 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -22,6 +25,8 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(ResourceNotFoundException.class)
     ResponseEntity<ApiError> notFound(ResourceNotFoundException exception, HttpServletRequest request) {
@@ -66,7 +71,15 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ServiceUnavailableException.class)
     ResponseEntity<ApiError> unavailable(ServiceUnavailableException exception, HttpServletRequest request) {
+        log.error("Service unavailable while handling {}", request.getRequestURI(), rootCause(exception));
         return error(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", exception.getMessage(), request, Map.of());
+    }
+
+    @ExceptionHandler(MultimediaUploadException.class)
+    ResponseEntity<ApiError> multimediaUpload(MultimediaUploadException exception, HttpServletRequest request) {
+        log.error("Multimedia upload failed while handling {}", request.getRequestURI(), rootCause(exception));
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "MULTIMEDIA_UPLOAD_FAILED",
+                "Không thể tải tệp lên. Vui lòng thử lại sau.", request, Map.of());
     }
 
     @ExceptionHandler(AuthenticationException.class)
@@ -89,9 +102,21 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.PAYLOAD_TOO_LARGE, "UPLOAD_TOO_LARGE", "Uploaded file is too large", request, Map.of());
     }
 
+    @ExceptionHandler(MultipartException.class)
+    ResponseEntity<ApiError> invalidMultipart(MultipartException exception, HttpServletRequest request) {
+        log.warn("Invalid multipart request for {}: {}", request.getRequestURI(), exception.getMessage());
+        return error(HttpStatus.BAD_REQUEST, "MULTIPART_REQUEST_INVALID",
+                "Không thể đọc dữ liệu tải lên.", request, Map.of());
+    }
+
     @ExceptionHandler(Exception.class)
     ResponseEntity<ApiError> unexpected(Exception exception, HttpServletRequest request) {
+        log.error("Unexpected error while handling {}", request.getRequestURI(), exception);
         return error(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "An unexpected error occurred", request, Map.of());
+    }
+
+    private Throwable rootCause(Throwable exception) {
+        return exception.getCause() == null ? exception : exception.getCause();
     }
 
     private ResponseEntity<ApiError> error(HttpStatus status, String code, String message, HttpServletRequest request,

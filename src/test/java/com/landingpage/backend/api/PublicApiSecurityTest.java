@@ -72,6 +72,7 @@ class PublicApiSecurityTest {
         when(contentService.listPublished()).thenReturn(List.of());
         when(settingsService.getPublic()).thenReturn(new PublicSiteSettingsResponse(
                 "Agricultural Landing", null, null, null, null,
+                "https://zalo.me/0901234567",
                 JsonNodeFactory.instance.objectNode()));
 
         mockMvc.perform(get("/api/public/content"))
@@ -79,7 +80,8 @@ class PublicApiSecurityTest {
                 .andExpect(jsonPath("$").isArray());
         mockMvc.perform(get("/api/public/site-settings"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.websiteName").value("Agricultural Landing"));
+                .andExpect(jsonPath("$.websiteName").value("Agricultural Landing"))
+                .andExpect(jsonPath("$.zaloUrl").value("https://zalo.me/0901234567"));
     }
 
     @Test
@@ -108,5 +110,13 @@ class PublicApiSecurityTest {
                         .header("Access-Control-Request-Headers", "Content-Type"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"));
+
+        mockMvc.perform(options("/api/admin/settings")
+                        .header("Origin", "https://fe-admin-landingpage-ivory.vercel.app")
+                        .header("Access-Control-Request-Method", "PATCH")
+                        .header("Access-Control-Request-Headers", "Authorization,Content-Type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin",
+                        "https://fe-admin-landingpage-ivory.vercel.app"));
     }
 }

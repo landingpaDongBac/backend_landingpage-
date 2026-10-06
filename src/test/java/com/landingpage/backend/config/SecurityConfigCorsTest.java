@@ -18,6 +18,7 @@ class SecurityConfigCorsTest {
                 "http://127.0.0.1:5173",
                 "http://localhost:5174",
                 "http://127.0.0.1:5174",
+                "https://fe-admin-landingpage-ivory.vercel.app",
                 "https://public-frontend.example.vercel.app"));
         CorsConfiguration configuration = source.getCorsConfiguration(new MockHttpServletRequest());
 
@@ -27,6 +28,8 @@ class SecurityConfigCorsTest {
         assertThat(configuration.checkOrigin("http://127.0.0.1:5174")).isEqualTo("http://127.0.0.1:5174");
         assertThat(configuration.checkOrigin("https://public-frontend.example.vercel.app"))
                 .isEqualTo("https://public-frontend.example.vercel.app");
+        assertThat(configuration.checkOrigin("https://fe-admin-landingpage-ivory.vercel.app"))
+                .isEqualTo("https://fe-admin-landingpage-ivory.vercel.app");
         assertThat(configuration.checkOrigin("https://untrusted.example")).isNull();
         assertThat(configuration.getAllowCredentials()).isTrue();
         assertThat(configuration.getAllowedMethods()).contains("OPTIONS", "GET", "POST");

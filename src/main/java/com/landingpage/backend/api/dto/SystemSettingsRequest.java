@@ -16,6 +16,7 @@ public record SystemSettingsRequest(
         @Size(max = 50) String supportPhone,
         @Email @Size(max = 320) String contactEmail,
         @Size(max = 1000) String address,
+        @Size(max = 500) String zaloUrl,
         LeadStatus defaultLeadStatus,
         LeadSource defaultLeadSource,
         Boolean publicationApprovalRequired,

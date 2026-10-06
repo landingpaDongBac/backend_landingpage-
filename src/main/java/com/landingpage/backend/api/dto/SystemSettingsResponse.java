@@ -13,6 +13,7 @@ public record SystemSettingsResponse(
         String supportPhone,
         String contactEmail,
         String address,
+        String zaloUrl,
         LeadStatus defaultLeadStatus,
         LeadSource defaultLeadSource,
         boolean publicationApprovalRequired,
