@@ -35,8 +35,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest({PublicPingController.class, PublicContentController.class,
-        PublicSiteSettingsController.class, PublicLeadController.class})
+@WebMvcTest(
+        controllers = {PublicPingController.class, PublicContentController.class,
+                PublicSiteSettingsController.class, PublicLeadController.class},
+        properties = "app.cors.allowed-origins=http://localhost:5173,http://127.0.0.1:5173,"
+                + "http://localhost:5174,http://127.0.0.1:5174,"
+                + "https://landingpage-fe-three.vercel.app,"
+                + "https://fe-admin-landingpage-ivory.vercel.app,"
+                + "https://vtnnchogiong.io.vn,https://www.vtnnchogiong.io.vn")
 @Import(SecurityConfig.class)
 class PublicApiSecurityTest {
 
@@ -124,5 +130,27 @@ class PublicApiSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string("Access-Control-Allow-Origin",
                         "https://fe-admin-landingpage-ivory.vercel.app"));
+
+        mockMvc.perform(options("/api/public/site-settings")
+                        .header("Origin", "https://www.vtnnchogiong.io.vn")
+                        .header("Access-Control-Request-Method", "GET"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin",
+                        "https://www.vtnnchogiong.io.vn"));
+
+        mockMvc.perform(options("/api/public/leads")
+                        .header("Origin", "https://vtnnchogiong.io.vn")
+                        .header("Access-Control-Request-Method", "POST")
+                        .header("Access-Control-Request-Headers", "Content-Type"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin",
+                        "https://vtnnchogiong.io.vn"));
+
+        mockMvc.perform(options("/api/public/content")
+                        .header("Origin", "https://landingpage-fe-three.vercel.app")
+                        .header("Access-Control-Request-Method", "GET"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin",
+                        "https://landingpage-fe-three.vercel.app"));
     }
 }

@@ -90,7 +90,8 @@ JWT_REFRESH_EXPIRATION=2592000000
 CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
-FRONTEND_URL=
+FRONTEND_URL=https://landingpage-fe-three.vercel.app,https://fe-admin-landingpage-ivory.vercel.app,https://vtnnchogiong.io.vn,https://www.vtnnchogiong.io.vn
+ADMIN_FRONTEND_URL=https://fe-admin-landingpage-ivory.vercel.app
 INITIAL_ADMIN_EMAIL=
 INITIAL_ADMIN_PASSWORD=
 ```
@@ -102,6 +103,8 @@ Create a Render Web Service from this repository, use the included `Dockerfile`,
 Use Supabase as PostgreSQL through JDBC. If using a Supabase pooler, choose a JDBC URL and pool settings compatible with prepared statements and SSL requirements.
 
 For a direct Supabase connection, use its JDBC URL with SSL enabled. For the Supabase transaction pooler, use the pooler host/port and keep the application pool small; append provider-recommended SSL and prepared-statement parameters to `DB_URL`. Render's production profile requires `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`, `JWT_EXPIRATION`, `FRONTEND_URL`, and all three Cloudinary credentials.
+
+`FRONTEND_URL` accepts a comma-separated list of exact origins without trailing slashes. Keep the old public Vercel origin in this list when adding custom domains. Localhost origins are already included by the shared application configuration, and `ADMIN_FRONTEND_URL` remains independently configurable.
 
 Recommended Render health-check path: `/actuator/health`.
 
