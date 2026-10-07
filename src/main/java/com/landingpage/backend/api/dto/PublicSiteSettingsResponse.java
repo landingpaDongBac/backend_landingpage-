@@ -8,7 +8,9 @@ public record PublicSiteSettingsResponse(
         String supportPhone,
         String contactEmail,
         String address,
+        String supportHours,
         String zaloUrl,
+        String facebookUrl,
         JsonNode displayConfiguration
 ) {
 }

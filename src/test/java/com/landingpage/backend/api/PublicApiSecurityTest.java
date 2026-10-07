@@ -71,8 +71,9 @@ class PublicApiSecurityTest {
     void anonymousPublicContentAndSettingsRemainAccessible() throws Exception {
         when(contentService.listPublished()).thenReturn(List.of());
         when(settingsService.getPublic()).thenReturn(new PublicSiteSettingsResponse(
-                "Agricultural Landing", null, null, null, null,
-                "https://zalo.me/0901234567",
+                "Agricultural Landing", null, "0901234567", "support@example.com", "Dak Lak",
+                "Thứ Hai - Thứ Bảy, 08:00 - 17:00", "https://zalo.me/0901234567",
+                "https://www.facebook.com/agricultural-landing",
                 JsonNodeFactory.instance.objectNode()));
 
         mockMvc.perform(get("/api/public/content"))
@@ -81,7 +82,12 @@ class PublicApiSecurityTest {
         mockMvc.perform(get("/api/public/site-settings"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.websiteName").value("Agricultural Landing"))
-                .andExpect(jsonPath("$.zaloUrl").value("https://zalo.me/0901234567"));
+                .andExpect(jsonPath("$.supportPhone").value("0901234567"))
+                .andExpect(jsonPath("$.contactEmail").value("support@example.com"))
+                .andExpect(jsonPath("$.address").value("Dak Lak"))
+                .andExpect(jsonPath("$.supportHours").value("Thứ Hai - Thứ Bảy, 08:00 - 17:00"))
+                .andExpect(jsonPath("$.zaloUrl").value("https://zalo.me/0901234567"))
+                .andExpect(jsonPath("$.facebookUrl").value("https://www.facebook.com/agricultural-landing"));
     }
 
     @Test

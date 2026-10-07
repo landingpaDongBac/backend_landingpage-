@@ -39,9 +39,13 @@ public class SystemSettingsService {
     @Transactional(readOnly = true)
     public PublicSiteSettingsResponse getPublic() {
         SystemSettings settings = repository.findById(SystemSettings.SINGLETON_ID).orElseGet(this::defaults);
+        String supportHours = resolvedSupportHours(settings);
+        String facebookUrl = resolvedFacebookUrl(settings);
         return new PublicSiteSettingsResponse(settings.getWebsiteName(), settings.getPublicInformation(),
-                settings.getSupportPhone(), settings.getContactEmail(), settings.getAddress(), settings.getZaloUrl(),
-                publicDisplayConfiguration(settings.getDisplayConfiguration(), settings.getZaloUrl()));
+                settings.getSupportPhone(), settings.getContactEmail(), settings.getAddress(), supportHours,
+                settings.getZaloUrl(), facebookUrl,
+                publicDisplayConfiguration(settings.getDisplayConfiguration(), settings.getZaloUrl(),
+                        supportHours, facebookUrl));
     }
 
     @Transactional
@@ -53,7 +57,7 @@ public class SystemSettingsService {
         if (request.supportPhone() != null) settings.setSupportPhone(clean(request.supportPhone()));
         if (request.contactEmail() != null) settings.setContactEmail(clean(request.contactEmail()));
         if (request.address() != null) settings.setAddress(clean(request.address()));
-        updateZalo(settings, request);
+        updatePublicContactFields(settings, request);
         if (request.defaultLeadStatus() != null) settings.setDefaultLeadStatus(request.defaultLeadStatus());
         if (request.defaultLeadSource() != null) settings.setDefaultLeadSource(request.defaultLeadSource());
         if (request.publicationApprovalRequired() != null) {
@@ -82,11 +86,15 @@ public class SystemSettingsService {
         boolean cloudinaryConfigured = present(cloudName) && present(cloudinaryApiKey) && present(cloudinaryApiSecret);
         var infrastructure = new SystemSettingsResponse.InfrastructureStatus(
                 databaseConnected(), cloudinaryConfigured, cloudinaryConfigured);
+        String supportHours = resolvedSupportHours(settings);
+        String facebookUrl = resolvedFacebookUrl(settings);
         return new SystemSettingsResponse(settings.getWebsiteName(), settings.getDefaultLanguage(),
                 settings.getPublicInformation(), settings.getSupportPhone(), settings.getContactEmail(),
-                settings.getAddress(), settings.getZaloUrl(), settings.getDefaultLeadStatus(), settings.getDefaultLeadSource(),
+                settings.getAddress(), supportHours, settings.getZaloUrl(), facebookUrl,
+                settings.getDefaultLeadStatus(), settings.getDefaultLeadSource(),
                 settings.isPublicationApprovalRequired(), settings.getPreviewWidth(),
-                configurationWithZalo(settings.getDisplayConfiguration(), settings.getZaloUrl()), infrastructure,
+                configurationWithPublicContacts(settings.getDisplayConfiguration(), settings.getZaloUrl(),
+                        supportHours, facebookUrl), infrastructure,
                 settings.getUpdatedAt(), settings.getUpdatedBy());
     }
 
@@ -98,21 +106,39 @@ public class SystemSettingsService {
     private boolean present(String value) { return value != null && !value.isBlank(); }
     private String clean(String value) { return value == null || value.isBlank() ? null : value.trim(); }
 
-    private void updateZalo(SystemSettings settings, SystemSettingsRequest request) {
+    private void updatePublicContactFields(SystemSettings settings, SystemSettingsRequest request) {
+        ObjectNode existingConfiguration = configurationObject(settings.getDisplayConfiguration());
         boolean configurationProvided = request.displayConfiguration() != null;
         ObjectNode configuration = configurationProvided
                 ? validatedConfiguration(request.displayConfiguration())
-                : configurationWithZalo(settings.getDisplayConfiguration(), settings.getZaloUrl());
+                : existingConfiguration;
+
+        if (request.supportHours() != null) {
+            settings.setSupportHours(clean(request.supportHours()));
+        } else if (settings.getSupportHours() == null) {
+            com.fasterxml.jackson.databind.JsonNode fallbackSource =
+                    configurationProvided && hasLegacySupportHours(configuration)
+                            ? configuration : existingConfiguration;
+            settings.setSupportHours(clean(extractLegacySupportHours(fallbackSource)));
+        }
+
+        if (request.facebookUrl() != null) {
+            settings.setFacebookUrl(normalizeFacebookUrl(request.facebookUrl()));
+        } else if (settings.getFacebookUrl() == null) {
+            com.fasterxml.jackson.databind.JsonNode fallbackSource =
+                    configurationProvided && hasLegacyFacebookUrl(configuration)
+                            ? configuration : existingConfiguration;
+            settings.setFacebookUrl(normalizeLegacyFacebookUrl(extractLegacyFacebookUrl(fallbackSource)));
+        }
 
         if (request.zaloUrl() != null) {
             settings.setZaloUrl(normalizeZaloUrl(request.zaloUrl()));
-        } else if (configurationProvided) {
+        } else if (configurationProvided && hasLegacyZaloUrl(configuration)) {
             settings.setZaloUrl(normalizeZaloUrl(extractLegacyZaloUrl(configuration)));
         }
 
-        if (configurationProvided || request.zaloUrl() != null) {
-            settings.setDisplayConfiguration(configurationWithZalo(configuration, settings.getZaloUrl()));
-        }
+        settings.setDisplayConfiguration(configurationWithPublicContacts(configuration, settings.getZaloUrl(),
+                settings.getSupportHours(), settings.getFacebookUrl()));
     }
 
     private ObjectNode validatedConfiguration(com.fasterxml.jackson.databind.JsonNode source) {
@@ -143,6 +169,27 @@ public class SystemSettingsService {
         }
     }
 
+    private String normalizeFacebookUrl(String value) {
+        String normalized = clean(value);
+        if (normalized == null) return null;
+        try {
+            URI uri = new URI(normalized);
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            boolean supportedScheme = "http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme);
+            boolean supportedHost = host != null && ("facebook.com".equalsIgnoreCase(host)
+                    || host.toLowerCase(Locale.ROOT).endsWith(".facebook.com")
+                    || "fb.com".equalsIgnoreCase(host)
+                    || host.toLowerCase(Locale.ROOT).endsWith(".fb.com"));
+            if (!supportedScheme || !supportedHost || uri.getUserInfo() != null) {
+                throw new BadRequestException("facebookUrl must be a valid http(s) Facebook URL");
+            }
+            return uri.toString();
+        } catch (URISyntaxException exception) {
+            throw new BadRequestException("facebookUrl must be a valid http(s) Facebook URL", exception);
+        }
+    }
+
     private String extractLegacyZaloUrl(com.fasterxml.jackson.databind.JsonNode source) {
         if (source == null || !source.isObject()) return null;
         com.fasterxml.jackson.databind.JsonNode zalo = source.get("zalo");
@@ -152,30 +199,104 @@ public class SystemSettingsService {
         return contactZalo.isTextual() ? contactZalo.asText() : null;
     }
 
-    private ObjectNode configurationWithZalo(com.fasterxml.jackson.databind.JsonNode source, String zaloUrl) {
-        ObjectNode configuration = source != null && source.isObject()
+    private boolean hasLegacyZaloUrl(com.fasterxml.jackson.databind.JsonNode source) {
+        if (source == null || !source.isObject()) return false;
+        com.fasterxml.jackson.databind.JsonNode zalo = source.get("zalo");
+        if (zalo != null && (zalo.isTextual()
+                || zalo.isObject() && zalo.path("url").isTextual())) return true;
+        return source.path("contact").path("zalo").isTextual();
+    }
+
+    private String extractLegacySupportHours(com.fasterxml.jackson.databind.JsonNode source) {
+        com.fasterxml.jackson.databind.JsonNode value = source == null
+                ? null : source.path("contact").get("supportHours");
+        return value != null && value.isTextual() ? value.asText() : null;
+    }
+
+    private boolean hasLegacySupportHours(com.fasterxml.jackson.databind.JsonNode source) {
+        com.fasterxml.jackson.databind.JsonNode value = source == null
+                ? null : source.path("contact").get("supportHours");
+        return value != null && value.isTextual();
+    }
+
+    private String extractLegacyFacebookUrl(com.fasterxml.jackson.databind.JsonNode source) {
+        com.fasterxml.jackson.databind.JsonNode value = source == null
+                ? null : source.path("socials").get("facebook");
+        return value != null && value.isTextual() ? value.asText() : null;
+    }
+
+    private boolean hasLegacyFacebookUrl(com.fasterxml.jackson.databind.JsonNode source) {
+        com.fasterxml.jackson.databind.JsonNode value = source == null
+                ? null : source.path("socials").get("facebook");
+        return value != null && value.isTextual();
+    }
+
+    private String resolvedSupportHours(SystemSettings settings) {
+        return settings.getSupportHours() != null
+                ? settings.getSupportHours()
+                : clean(extractLegacySupportHours(settings.getDisplayConfiguration()));
+    }
+
+    private String resolvedFacebookUrl(SystemSettings settings) {
+        return settings.getFacebookUrl() != null
+                ? settings.getFacebookUrl()
+                : normalizeLegacyFacebookUrl(extractLegacyFacebookUrl(settings.getDisplayConfiguration()));
+    }
+
+    private String normalizeLegacyFacebookUrl(String value) {
+        try {
+            return normalizeFacebookUrl(value);
+        } catch (BadRequestException exception) {
+            return null;
+        }
+    }
+
+    private ObjectNode configurationObject(com.fasterxml.jackson.databind.JsonNode source) {
+        return source != null && source.isObject()
                 ? (ObjectNode) source.deepCopy() : JsonNodeFactory.instance.objectNode();
+    }
+
+    private ObjectNode configurationWithPublicContacts(com.fasterxml.jackson.databind.JsonNode source, String zaloUrl,
+                                                       String supportHours, String facebookUrl) {
+        ObjectNode configuration = configurationObject(source);
         if (zaloUrl == null) {
             configuration.remove("zalo");
-            if (configuration.path("contact").isObject()) {
-                ((ObjectNode) configuration.path("contact")).remove("zalo");
-            }
         } else {
             configuration.put("zalo", zaloUrl);
-            if (configuration.path("contact").isObject()) {
-                ((ObjectNode) configuration.path("contact")).put("zalo", zaloUrl);
-            }
         }
+
+        ObjectNode contact = childObject(configuration, "contact",
+                zaloUrl != null || supportHours != null);
+        synchronizeText(contact, "zalo", zaloUrl);
+        synchronizeText(contact, "supportHours", supportHours);
+
+        ObjectNode socials = childObject(configuration, "socials", facebookUrl != null);
+        synchronizeText(socials, "facebook", facebookUrl);
         return configuration;
     }
 
-    private ObjectNode publicDisplayConfiguration(com.fasterxml.jackson.databind.JsonNode source, String zaloUrl) {
+    private ObjectNode childObject(ObjectNode parent, String field, boolean create) {
+        if (parent.path(field).isObject()) return (ObjectNode) parent.path(field);
+        if (!create) return null;
+        ObjectNode child = JsonNodeFactory.instance.objectNode();
+        parent.set(field, child);
+        return child;
+    }
+
+    private void synchronizeText(ObjectNode object, String field, String value) {
+        if (object == null) return;
+        if (value == null) object.remove(field);
+        else object.put(field, value);
+    }
+
+    private ObjectNode publicDisplayConfiguration(com.fasterxml.jackson.databind.JsonNode source, String zaloUrl,
+                                                  String supportHours, String facebookUrl) {
         ObjectNode safe = JsonNodeFactory.instance.objectNode();
         if (source != null && source.isObject()) {
             for (String key : new String[] { "zalo", "contact", "socials", "links", "privacyUrl", "termsUrl", "seo", "campaign", "logoAlt" }) {
                 if (source.has(key)) safe.set(key, source.get(key).deepCopy());
             }
         }
-        return configurationWithZalo(safe, zaloUrl);
+        return configurationWithPublicContacts(safe, zaloUrl, supportHours, facebookUrl);
     }
 }

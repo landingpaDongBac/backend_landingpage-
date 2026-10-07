@@ -34,7 +34,9 @@ public class SystemSettings {
     @Column(name = "support_phone", length = 50) private String supportPhone;
     @Column(name = "contact_email", length = 320) private String contactEmail;
     @Column(length = 1000) private String address;
+    @Column(name = "support_hours", length = 1000) private String supportHours;
     @Column(name = "zalo_url", length = 500) private String zaloUrl;
+    @Column(name = "facebook_url", length = 500) private String facebookUrl;
     @Enumerated(EnumType.STRING) @Column(name = "default_lead_status", nullable = false, length = 50)
     private LeadStatus defaultLeadStatus;
     @Enumerated(EnumType.STRING) @Column(name = "default_lead_source", nullable = false, length = 50)

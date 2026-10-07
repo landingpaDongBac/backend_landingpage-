@@ -56,5 +56,8 @@ class PostgresMigrationIntegrationTest {
         assertThat(jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.columns where table_schema='public' and table_name='system_settings' and column_name='zalo_url'",
                 Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.columns where table_schema='public' and table_name='system_settings' and column_name in ('support_hours','facebook_url')",
+                Integer.class)).isEqualTo(2);
     }
 }
